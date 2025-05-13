@@ -7,6 +7,7 @@ This is a Linux-based system programming project simulating a **Treasure Hunt Ga
 - `monitor.c` – Monitors logs from treasure hunts and displays operations.
 - `treasure.c` – Main treasure manager. Handles treasure creation, storage, and clues.
 - `treasure_hub.c` – Central coordinator for creating treasure hunts and managing operations.
+- `calculate_score.c` – Calculates the score from each game for each player
 
 ---
 
@@ -18,6 +19,7 @@ To compile all components, use:
 gcc -o monitor monitor.c
 gcc -o treasure treasure.c
 gcc -o treasure_hub treasure_hub.c
+gcc -o calculate_score calculate_score.c
 ```
 
 Make sure you have `gcc` installed:
