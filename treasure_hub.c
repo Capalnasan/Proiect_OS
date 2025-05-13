@@ -1,108 +1,80 @@
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <signal.h>
 #include <sys/wait.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <string.h>
 
-#define REQUEST_FILE "monitor_request.txt"
-pid_t monitor_pid = -1;
-
-// Signal handler for SIGCHLD (monitor ended)
-void sigchld_handler(int signo) {
-    int status;
-    waitpid(monitor_pid, &status, WNOHANG);
-    monitor_pid = -1;
-    printf("[INFO] Monitor process terminated.\n");
+void create_hunt(const char *name) {
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "mkdir -p %s", name);
+    system(cmd);
+    snprintf(cmd, sizeof(cmd), "touch %s/logged_hunt", name);
+    system(cmd);
+    printf("Hunt %s created.\n", name);
 }
 
-void start_monitor() {
-    if (monitor_pid > 0) {
-        printf("[ERROR] Monitor already running.\n");
-        return;
-    }
+void run_monitor(const char *name) {
+    int pipefd[2];
+    pipe(pipefd);
 
-    monitor_pid = fork();
-    if (monitor_pid == 0) {
-        // Child process -> start monitor
-        execl("./monitor", "./monitor", NULL);
-        perror("execl failed");
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(pipefd[0]);
+        char fd_str[10];
+        snprintf(fd_str, sizeof(fd_str), "%d", pipefd[1]);
+        setenv("PIPE_WRITE_FD", fd_str, 1);
+        execl("./monitor", "monitor", name, NULL);
+        perror("execl");
         exit(1);
-    } else if (monitor_pid > 0) {
-        printf("[INFO] Monitor started. PID: %d\n", monitor_pid);
     } else {
-        perror("fork failed");
-    }
-}
-
-void send_request(const char *command) {
-    if (monitor_pid < 0) {
-        printf("[ERROR] Monitor not running.\n");
-        return;
-    }
-
-    // Write command to request file
-    FILE *f = fopen(REQUEST_FILE, "w");
-    if (!f) {
-        perror("fopen");
-        return;
-    }
-    fprintf(f, "%s\n", command);
-    fclose(f);
-
-    // Send SIGUSR1 to monitor
-    kill(monitor_pid, SIGUSR1);
-}
-
-void stop_monitor() {
-    if (monitor_pid < 0) {
-        printf("[ERROR] Monitor not running.\n");
-        return;
-    }
-
-    // Write stop command
-    send_request("stop_monitor");
-
-    // Wait for SIGCHLD to confirm termination
-    printf("[INFO] Waiting for monitor to terminate...\n");
-    sleep(2); // Slight delay to allow monitor to clean up
-}
-
-int main() {
-    // Set up SIGCHLD handler
-    struct sigaction sa;
-    sa.sa_handler = sigchld_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    sigaction(SIGCHLD, &sa, NULL);
-
-    char command[256];
-
-    while (1) {
-        printf("\n> Enter command: ");
-        if (!fgets(command, sizeof(command), stdin)) break;
-        command[strcspn(command, "\n")] = 0;
-
-        if (strcmp(command, "start_monitor") == 0) {
-            start_monitor();
-        } else if (strcmp(command, "list_hunts") == 0 ||
-                   strncmp(command, "list_treasures", 14) == 0 ||
-                   strncmp(command, "view_treasure", 13) == 0) {
-            send_request(command);
-        } else if (strcmp(command, "stop_monitor") == 0) {
-            stop_monitor();
-        } else if (strcmp(command, "exit") == 0) {
-            if (monitor_pid > 0) {
-                printf("[ERROR] Monitor still running. Stop it first.\n");
-            } else {
-                break;
-            }
-        } else {
-            printf("[ERROR] Unknown command.\n");
+        close(pipefd[1]);
+        char buffer[256];
+        while (read(pipefd[0], buffer, sizeof(buffer)) > 0) {
+            printf("%s", buffer);
         }
+        close(pipefd[0]);
+        wait(NULL);
+    }
+}
+
+void calculate_score(const char *name) {
+    int pipefd[2];
+    pipe(pipefd);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        execl("./calculate_score", "calculate_score", name, NULL);
+        perror("execl");
+        exit(1);
+    } else {
+        close(pipefd[1]);
+        char buffer[256];
+        int n;
+        while ((n = read(pipefd[0], buffer, sizeof(buffer)-1)) > 0) {
+            buffer[n] = '\0';
+            printf("%s", buffer);
+        }
+        close(pipefd[0]);
+        wait(NULL);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("Usage: %s <command> <hunt_name>\n", argv[0]);
+        return 1;
+    }
+
+    if (strcmp(argv[1], "createhunt") == 0) {
+        create_hunt(argv[2]);
+    } else if (strcmp(argv[1], "monitor") == 0) {
+        run_monitor(argv[2]);
+    } else if (strcmp(argv[1], "calculate_score") == 0) {
+        calculate_score(argv[2]);
+    } else {
+        printf("Unknown command.\n");
     }
 
     return 0;
